@@ -1,3 +1,11 @@
+logs/images/*.png
+logs/images_good/*.png
+logs/images_bad/*.png
+logs/*.net
+logs/*.net.old
+samples/*.jpg
+r_results/*.jpg
+
 # Compiled Lua sources
 luac.out
 
