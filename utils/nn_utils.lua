@@ -136,6 +136,13 @@ function nn_utils.switchColorSpace(images, from, to)
     return images
 end
 
+function nn_utils.switchColorSpaceSingle(image, from, to)
+    local images = nn_utils.toBatch(image)
+    images = nn_utils.toRgb(images, from)
+    images = nn_utils.rgbToColorSpace(images, to)
+    return images[1]
+end
+
 function nn_utils.toRgb(images, from)
     local images = nn_utils.toImageTensor(images)
     if from == "rgb" then
@@ -155,7 +162,29 @@ function nn_utils.toRgb(images, from)
         end
         return out
     else
-        error("[WARNING] unknown color space <from>: '" .. from .. "'")
+        error("Unknown color space <from>: '" .. from .. "'")
+    end
+end
+
+function nn_utils.toRgbSingle(image, from)
+    if from == "rgb" then
+        return image
+    elseif from == "y" then
+        return torch.repeatTensor(image, 3, 1, 1)
+    elseif from == "hsl" then
+        local out = torch.Tensor(3, images:size(3), images:size(4))
+        for i=1,images:size(1) do
+            out[i] = image.hsl2rgb(images[i])
+        end
+        return out
+    elseif from == "yuv" then
+        local out = torch.Tensor(3, images:size(3), images:size(4))
+        for i=1,images:size(1) do
+            out[i] = image.yuv2rgb(images[i])
+        end
+        return out
+    else
+        error("Unknown color space <from>: '" .. from .. "'")
     end
 end
 
@@ -214,6 +243,23 @@ function nn_utils.rgb2y(im, threeChannels)
     end
 
     return z
+end
+
+function nn_utils.toBatch(image)
+    -- maybe possible with repeatTensor?
+    if #image:size() == 1 then
+        local tnsr = torch.Tensor():resize(1, image:size(1))
+        tnsr[1] = image
+        return tnsr
+    elseif #image:size() == 2 then
+        local tnsr = torch.Tensor():resize(1, image:size(1), image:size(2))
+        tnsr[1] = image
+        return tnsr
+    else
+        local tnsr = torch.Tensor():resize(1, image:size(1), image:size(2), image:size(3))
+        tnsr[1] = image
+        return tnsr
+    end
 end
 
 -- Convert a list (table) of images to a Tensor.

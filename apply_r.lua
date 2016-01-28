@@ -43,7 +43,7 @@ Y_NOT_GENERATOR = 1
 -- run on gpu if chosen
 -- We have to load all kinds of libraries here, otherwise we risk crashes when loading
 -- saved networks afterwards
-print("<trainer> starting gpu support...")
+print("starting gpu support...")
 require 'nn'
 require 'cutorch'
 require 'cunn'
@@ -51,13 +51,13 @@ require 'dpnn'
 if OPT.gpu then
     cutorch.setDevice(OPT.gpu + 1)
     cutorch.manualSeed(OPT.seed)
-    print(string.format("<trainer> using gpu device %d", OPT.gpu))
+    print(string.format("using gpu device %d", OPT.gpu))
 end
 torch.setdefaulttensortype('torch.FloatTensor')
 
 function main()
     -- load previous network
-    print(string.format("<trainer> loading trained G from file '%s'", OPT.G))
+    print(string.format("loading trained G from file '%s'", OPT.G))
     local tmp = torch.load(OPT.G)
     MODEL_G = tmp.G
     MODEL_G:evaluate()
@@ -88,7 +88,7 @@ function main()
 
     -- Initialize G in autoencoder form
     -- G is a Sequential that contains (1) G Encoder and (2) G Decoder (both again Sequentials)
-    print(string.format("<trainer> loading trained R from file '%s'", OPT.R))
+    print(string.format("loading trained R from file '%s'", OPT.R))
     local tmp = torch.load(OPT.R)
     MODEL_R = tmp.R
     MODEL_R:evaluate()
@@ -98,6 +98,10 @@ function main()
         MODEL_R:float()
     end
 
+    -------------------------------------------
+    -- Vary single components (one by one) of a noise vector
+    -- Gives intuition about the embedding learned by G
+    -------------------------------------------
     print("Varying components...")
     local nbSteps = 16
     local steps
@@ -123,16 +127,24 @@ function main()
     variations = image.toDisplayTensor{input=variations, nrow=nbSteps, min=0, max=1.0}
     image.save(paths.concat(OPT.writeTo, 'variations.jpg'), variations)
 
-    print("Loading images...")
+    -------------------------------------------
+    -- Generate example images for all later steps
+    -------------------------------------------
+    print("Generating images...")
     --local images = DATASET.loadImages(1, 50000)
     local noise = NN_UTILS.createNoiseInputs(10000)
     local images = NN_UTILS.forwardBatched(MODEL_G, noise, OPT.batchSize)
 
+    -------------------------------------------
+    -- Recover noise vectors of example images using R
+    -------------------------------------------
     print("Converting images to attributes...")
     local attributes = NN_UTILS.forwardBatched(MODEL_R, images, OPT.batchSize)
     --local attributes = binarize(NN_UTILS.forwardBatched(MODEL_R, images, OPT.batchSize))
-    print(attributes[1])
 
+    -------------------------------------------
+    -- Cluster the generated images into 20 clusters
+    -------------------------------------------
     print("Clustering...")
     local nbClusters = 20
     local nbIterations = 15
@@ -143,12 +155,12 @@ function main()
         table.insert(cluster2imgs, {})
     end
 
+    -- find best clusters for each face
     for i=1,attributes:size(1) do
         local minDist = nil
         local minDistCluster = nil
         for j=1,nbClusters do
-            --local dist = torch.dist(attributes[i], centroids[j])
-            local dist = cosineDistance(attributes[i], centroids[j])
+            local dist = cosineSimilarity(attributes[i], centroids[j])
             if minDist == nil or dist < minDist then
                 minDist = dist
                 minDistCluster = j
@@ -158,6 +170,7 @@ function main()
         table.insert(cluster2imgs[minDistCluster], images[i])
     end
 
+    -- generate the average of all faces in a cluster (for each cluster)
     local averageFaces = {}
     for i=1,nbClusters do
         local clusterImgs = cluster2imgs[i]
@@ -169,6 +182,7 @@ function main()
         table.insert(averageFaces, face)
     end
 
+    -- merge faces within a cluster to one image and save it (for each cluster)
     print("Save images of clusters...")
     for i=1,nbClusters do
         if #cluster2imgs[i] > 0 then
@@ -183,14 +197,18 @@ function main()
         end
     end
 
-    print("Sorting by similarity...")
+    -------------------------------------------
+    -- Pick faces, search for most similar ones
+    -- (similarity based on the recovered noise vectors)
+    -------------------------------------------
+    print("Finding faces by similarity...")
     local nbSimilarNeedles = 5
     for i=1,nbSimilarNeedles do
         local atts = attributes[i*100]
         local similar = {}
         for j=1,attributes:size(1) do
             --table.insert(similar, {j, torch.dist(atts, attributes[j])})
-            table.insert(similar, {j, cosineDistance(atts, attributes[j])})
+            table.insert(similar, {j, cosineSimilarity(atts, attributes[j])})
         end
         table.sort(similar, function(a,b) return a[2]>b[2] end)
         --print(similar)
@@ -202,11 +220,50 @@ function main()
         end
 
         tnsr = NN_UTILS.toRgb(tnsr, OPT.colorSpace)
+
+        -- add blue border around search image
+        tnsr[{{1}, {3}, {1,IMG_DIMENSIONS[2]}, {1}}] = 1.0 -- left
+        tnsr[{{1}, {3}, {1,IMG_DIMENSIONS[2]}, {IMG_DIMENSIONS[3]}}] = 1.0 -- right
+        tnsr[{{1}, {3}, {1}, {1,IMG_DIMENSIONS[3]}}] = 1.0 -- top
+        tnsr[{{1}, {3}, {IMG_DIMENSIONS[2]}, {1,IMG_DIMENSIONS[3]}}] = 1.0 -- bottom
+
+        tnsr[{{1}, {1,2}, {1,IMG_DIMENSIONS[2]}, {1}}] = 0.0 -- left
+        tnsr[{{1}, {1,2}, {1,IMG_DIMENSIONS[2]}, {IMG_DIMENSIONS[3]}}] = 0.0 -- right
+        tnsr[{{1}, {1,2}, {1}, {1,IMG_DIMENSIONS[3]}}] = 0.0 -- top
+        tnsr[{{1}, {1,2}, {IMG_DIMENSIONS[2]}, {1,IMG_DIMENSIONS[3]}}] = 0.0 -- bottom
+
         tnsr = image.toDisplayTensor{input=tnsr, nrow=math.ceil(math.sqrt(tnsr:size(1))), min=0, max=1.0}
         image.save(paths.concat(OPT.writeTo, string.format('similar_%02d.jpg', i)), tnsr)
     end
+
+    -------------------------------------------
+    -- Fix images generated by G
+    -- Fix is done via
+    --   noise -> G -> image -> R -> noise -> G -> image
+    -------------------------------------------
+    print("Fixing faces...")
+    local nbPairs = 50
+    local pairs = torch.zeros(nbPairs, 3, 1+IMG_DIMENSIONS[2]+1, 1 + 2*IMG_DIMENSIONS[3] + 1) -- N pairs, 2 images, 1px borders around pairs
+    pairs[{{}, {3}, {}, {}}] = 1.0 -- blue background
+
+    for i=1,nbPairs do
+        local afterG = images[i]:clone() -- face
+        local afterGR = NN_UTILS.toBatch(attributes[i]) -- noise vector recovered by R
+        afterGR = afterGR:repeatTensor(2, 1) -- for whatever reason torch insists on getting 2 instead of 1 vector
+        local afterGRG = MODEL_G:forward(afterGR):clone()[1] -- fixed face (G->R->G)
+
+        afterG = NN_UTILS.toRgbSingle(afterG, OPT.colorSpace)
+        afterGRG = NN_UTILS.toRgbSingle(afterGRG, OPT.colorSpace)
+
+        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {2, 1+IMG_DIMENSIONS[3]}}] = afterG
+        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {1+IMG_DIMENSIONS[3]+1, 1+IMG_DIMENSIONS[3]+IMG_DIMENSIONS[3]}}] = afterGRG
+    end
+
+    pairs = image.toDisplayTensor{input=pairs, nrow=4, min=0, max=1.0}
+    image.save(paths.concat(OPT.writeTo, string.format('pairs.jpg', i)), pairs)
 end
 
+--[[
 function binarize(attributes)
     local tnsr = torch.Tensor():resizeAs(attributes)
     for row=1,attributes:size(1) do
@@ -224,10 +281,15 @@ function binarize(attributes)
     end
     return tnsr
 end
+--]]
 
-function cosineDistance(v1, v2)
+-- Measure the cosine similarity of two vectors.
+-- @param v1 First vector
+-- @param v2 Second vector
+-- @returns float (-1.0 to +1.0)
+function cosineSimilarity(v1, v2)
     local cos = nn.CosineDistance()
-    local result = cos:forward({v1, v2})
+    local result = cos:forward({v1:clone(), v2:clone()}):clone()
     return result[1]
 end
 
