@@ -10,14 +10,13 @@ This seems to have some potential for Unsupervised Learning, as well as fixing e
 
 The following images show roughly the low dimensional representation of faces learned by G (R is not used here, yet).
 To generate the images, a random noise vector of 32 normal distributed components was first generated.
-Then each component of the noise vector was picked (one by one) and set to values between -2.0 and +2.0 (in 16 steps).
-That created `32*16 = 512` noise vectors. For each noise vector one image was generated.
+Then each component of the noise vector was picked (one by one) and set to values between -3.0 and +3.0 (in 16 steps).
+That led to `32*16 = 512` noise vectors. For each noise vector one image was generated.
 
-TODO
+![Varying single components of a noise vector](images/variations.jpg?raw=true "Varying single components of a noise vector")
 
-![Example images from the training set](images/baubles_64x64_2_trainset.jpg?raw=true "Example images from the training set")
-
-**Training set (excerpt):**
+Apparently G does not connect single features with single components, e.g. one for the gender or the size of the nose.
+Instead, changing single components morphs the whole face.
 
 ## Sorting by similarity
 
@@ -27,16 +26,14 @@ Then for each image one face was picked.
 That face's recovered noise vector was compared to all other recovered noise vectors using cosine similarity.
 Then the 100 most similar faces were picked.
 
+![Similarity search 1](images/similar_01.jpg?raw=true "Similarity search 1")
+![Similarity search 2](images/similar_02.jpg?raw=true "Similarity search 2")
+![Similarity search 3](images/similar_03.jpg?raw=true "Similarity search 3")
+![Similarity search 4](images/similar_04.jpg?raw=true "Similarity search 4")
+![Similarity search 5](images/similar_05.jpg?raw=true "Similarity search 5")
+
 The images indicate that the pair of G and R do have some potential for unsupervised learning.
 However, the results are not yet good enough to be used in production.
-
-TODO images
-
-TODO
-
-![Example images from the training set](images/baubles_64x64_2_trainset.jpg?raw=true "Example images from the training set")
-
-**Training set (excerpt):**
 
 ## Clustering
 
@@ -46,15 +43,16 @@ These 10,000 noise vectors were then grouped into 20 clusters using kmeans (each
 For each cluster, the average of all faces within the cluster was calculated (add up the pixel values, divide by the count).
 Each image shows one cluster with the first face being the average of the cluster.
 
+![Cluster 1](images/cluster_01.jpg?raw=true "Cluster 1")
+![Cluster 2](images/cluster_02.jpg?raw=true "Cluster 2")
+![Cluster 3](images/cluster_03.jpg?raw=true "Cluster 3")
+![Cluster 4](images/cluster_04.jpg?raw=true "Cluster 4")
+![Cluster 5](images/cluster_05.jpg?raw=true "Cluster 5")
+
 The clusters do contain faces that have some similarity.
-However, the similarity seems to be on a broader level than probably desired.
-I.e., the similarity is mostly focused on brightness of the faces, contrast and their angle/rotation.
-
-TODO
-
-![Example images from the training set](images/baubles_64x64_2_trainset.jpg?raw=true "Example images from the training set")
-
-**Training set (excerpt):**
+However, the similarity seems to be on a broader level than usually desired.
+I.e., the similarity is mostly focused on aspects like brightness, contrast or angle/rotation.
+This is probably expected given the (previously described) coarse embedding.
 
 ## Fixing errors in generated images
 
@@ -70,9 +68,7 @@ Note that R usually does not fix catastrophic failures of G (e.g. mostly white/b
 
 The following image shows faces before (left) and after (right) fixing.
 
-TODO
-
-![Example images from the training set](images/baubles_64x64_2_trainset.jpg?raw=true "Example images from the training set")
+![Images before and after R](images/fixed_images.jpg?raw=true "Images before and after R")
 
 This method might be usable for anomaly detection: Fix an image and compare its unfixed and fixed version with each other.
 If they are too dissimilar, the image may be considered an anomaly.
