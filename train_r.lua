@@ -24,7 +24,8 @@ OPT = lapp[[
     --R_L2          (default 1e-4)
     --G             (default "logs/adversarial.net")
     --continue      (default "")
-    --dataset       (default "NONE")       Directory that contains *.jpg images
+    --dataset       (default "NONE")    Directory that contains *.jpg images
+    --fixer                             Train to fix image errors
 ]]
 
 NORMALIZE = false
@@ -96,14 +97,13 @@ function main()
     DATASET.setDirs({OPT.dataset})
     ----------------------------------------------------------------------
 
-    -- Initialize G in autoencoder form
-    -- G is a Sequential that contains (1) G Encoder and (2) G Decoder (both again Sequentials)
+    -- Create or reload G
     if OPT.continue ~= "" then
         local tmp = torch.load(OPT.continue)
         MODEL_R = tmp.R
         if OPT.gpu == false then MODEL_R:float() end
     else
-        MODEL_R = MODELS.create_R(IMG_DIMENSIONS, OPT.noiseDim, OPT.noiseMethod, OPT.gpu ~= false)
+        MODEL_R = MODELS.create_R(IMG_DIMENSIONS, OPT.noiseDim, OPT.noiseMethod, OPT.fixer, OPT.gpu ~= false)
     end
 
     print("G:")
@@ -130,6 +130,8 @@ function main()
     local batchIdx = 1
     while true do
         if OPT.nbBatches >= 0 and batchIdx > OPT.nbBatches then
+            print("<trainer> Last batch reached.")
+            save()
             break
         end
 
@@ -225,7 +227,9 @@ end
 
 function save()
     print("Saving networks...")
-    local filename = paths.concat(OPT.save, string.format('r_%dx%dx%d_nd%d_%s.net', IMG_DIMENSIONS[1], IMG_DIMENSIONS[2], IMG_DIMENSIONS[3], OPT.noiseDim, OPT.noiseMethod))
+    local fixer = ""
+    if OPT.fixer then fixer = "_fixer" end
+    local filename = paths.concat(OPT.save, string.format('r_%dx%dx%d_nd%d_%s%s.net', IMG_DIMENSIONS[1], IMG_DIMENSIONS[2], IMG_DIMENSIONS[3], OPT.noiseDim, OPT.noiseMethod, fixer))
     NN_UTILS.prepareNetworkForSave(MODEL_R)
     torch.save(filename, {R=MODEL_R, opt=OPT})
 end

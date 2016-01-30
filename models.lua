@@ -199,7 +199,7 @@ end
 -- @param cuda Whether to create the model in CUDA/GPU mode.
 -- @returns nn.Sequential
 function models.create_G(dimensions, noiseDim, cuda)
-    return models.create_G4(dimensions, noiseDim, cuda)
+    return models.create_G3(dimensions, noiseDim, cuda)
 end
 
 -- Creates D.
@@ -382,16 +382,23 @@ function models.create_D_facegen(dimensions, cuda)
     return conv
 end
 
-function models.create_R(dimensions, noiseDim, noiseMethod, cuda)
-    return models.create_R_default(dimensions, noiseDim, noiseMethod, cuda)
+function models.create_R(dimensions, noiseDim, noiseMethod, fixer, cuda)
+    return models.create_R_default(dimensions, noiseDim, noiseMethod, fixer, cuda)
 end
 
-function models.create_R_default(dimensions, noiseDim, noiseMethod, cuda)
+function models.create_R_default(dimensions, noiseDim, noiseMethod, fixer, cuda)
     assert(noiseMethod == "normal" or noiseMethod == "uniform")
 
     local conv = nn.Sequential()
     if cuda then
         conv:add(nn.Copy('torch.FloatTensor', 'torch.CudaTensor', true, true))
+    end
+
+    if fixer then
+        local drop = nn.Dropout(0.5, true)
+        drop:training()
+        drop.evaluate = function() end
+        conv:add(drop)
     end
 
     -- 32x32
