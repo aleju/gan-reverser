@@ -15,63 +15,18 @@ OPT = lapp[[
     --seed          (default 1)                               Random number seed to use.
     --gpu           (default 0)                               GPU to run on
     --runs          (default 1)                               How often to sample and save images
-    --noiseDim      (default 100)                             Noise vector size.
+    --noiseDim      (default 32)                              Noise vector size.
     --noiseMethod   (default "normal")                        normal|uniform
     --batchSize     (default 16)                              Sizes of batches.
-    --profile       (default "NONE")                          snow32|snow64|trees32|trees64|baubles32|baubles64
+    --height        (default 32)                              Height of the training images
+    --width         (default 32)                              Width of the training images
+    --dataset       (default "NONE")                          Directory that contains *.jpg images
 ]]
-
-assert(OPT.profile == "snow32"
-       or OPT.profile == "snow64"
-       or OPT.profile == "trees32"
-       or OPT.profile == "trees64"
-       or OPT.profile == "baubles32"
-       or OPT.profile == "baubles64",
-       "--profile must be 'snow32', 'snow64', 'trees32', 'trees64', 'baubles32' or 'baubles64'")
-
-if OPT.profile == "snow32" then
-    OPT.height = 32
-    OPT.width = 32+16
-    OPT.dataDirs = {"dataset/preprocessed/snowy-landscapes"}
-elseif OPT.profile == "snow64" then
-    OPT.height = 64
-    OPT.width = 64+32
-    OPT.dataDirs = {"dataset/preprocessed/snowy-landscapes"}
-elseif OPT.profile == "trees32" then
-    OPT.height = 32
-    OPT.width = 32
-    OPT.dataDirs = {"dataset/preprocessed/christmas-trees"}
-elseif OPT.profile == "trees64" then
-    OPT.height = 64
-    OPT.width = 64
-    OPT.dataDirs = {"dataset/preprocessed/christmas-trees"}
-elseif OPT.profile == "baubles32" then
-    OPT.height = 32
-    OPT.width = 32
-    OPT.dataDirs = {"dataset/preprocessed/baubles"}
-elseif OPT.profile == "baubles64" then
-    OPT.height = 64
-    OPT.width = 64
-    OPT.dataDirs = {"dataset/preprocessed/baubles"}
-else
-    error("Unknown profile name")
-end
 
 if OPT.gpu < 0 then
     print("[ERROR] Sample script currently only runs on GPU, set --gpu=x where x is between 0 and 3.")
     exit()
 end
-
-if OPT.colorSpace == "y" then
-    OPT.grayscale = true
-end
-
--- Start GPU mode
-print("Starting gpu support...")
-require 'cutorch'
-require 'cunn'
-torch.setdefaulttensortype('torch.FloatTensor')
-cutorch.setDevice(OPT.gpu + 1)
 
 -- initialize seeds
 math.randomseed(OPT.seed)
@@ -79,7 +34,7 @@ torch.manualSeed(OPT.seed)
 cutorch.manualSeed(OPT.seed)
 
 -- Image dimensions
-if OPT.grayscale then
+if OPT.colorSpace == "y" then
     IMG_DIMENSIONS = {1, OPT.height, OPT.width}
 else
     IMG_DIMENSIONS = {3, OPT.height, OPT.width}
@@ -87,21 +42,35 @@ end
 
 -- Initialize dataset
 --DATASET.nbChannels = IMG_DIMENSIONS[1]
-DATASET.colorSpace = OPT.colorSpace
+assert(OPT.dataset ~= "NONE")
+DATASET.setColorSpace(OPT.colorSpace)
 DATASET.setFileExtension("jpg")
 DATASET.setHeight(OPT.height)
 DATASET.setWidth(OPT.width)
-DATASET.setDirs(OPT.dataDirs)
+DATASET.setDirs({OPT.dataset})
+
+-- run on gpu if chosen
+-- We have to load all kinds of libraries here, otherwise we risk crashes when loading
+-- saved networks afterwards
+print("<trainer> starting gpu support...")
+require 'nn'
+require 'cutorch'
+require 'cunn'
+require 'dpnn'
+if OPT.gpu then
+    cutorch.setDevice(OPT.gpu + 1)
+    cutorch.manualSeed(OPT.seed)
+    print(string.format("<trainer> using gpu device %d", OPT.gpu))
+end
+torch.setdefaulttensortype('torch.FloatTensor')
 
 -- Main function that runs the sampling
 function main()
     -- Load all models
-    local G, D = loadModels()
-
-    -- We need these global variables for some methods. Ugly code.
-    MODEL_G = G
-    MODEL_D = D
-
+    -- these variables are used by some of the functions in nn_utils and hence
+    -- have to be globals
+    MODEL_G, MODEL_D = loadModels()
+    
     print("Sampling...")
     for run=1,OPT.runs do
         -- save 64 randomly selected images from the training set
