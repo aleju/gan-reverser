@@ -92,10 +92,12 @@ Requirements are:
 To train a network:
 * `th -ldisplay.start` - This will start `display`, which is used to plot results in the browser
 * Open http://localhost:8000/ in your browser (`display` interface)
-* Train a pair of G and D with `th train.lua --dataset="/path/to/your/images" --colorSpace="y"` (remove `--colorSpace` to generate RGB images instead of grayscale ones). Manually stop (ctrl+c) this script when you like the results. Might take a few hundred epochs.
+* Train a pair of G and D with `th train.lua --dataset="/path/to/your/images"` . (Add `--colorSpace="y"` to generate grayscale images instead of RGB ones.) Manually stop (ctrl+c) this script when you like the results. Might take a few hundred epochs.
 * Train R using `th train_r.lua --dataset="/path/to/your/images" --nbBatches=2000` . (Runs for 2000 batches. Less batches results in more "average" faces.)
 * Train R for fixing images using `th train_r.lua --dataset="/path/to/your/images" --nbBatches=2000 --fixer` .
-* Apply R using `th apply_r.lua --dataset="/path/to/your/images"` . (You can change the used networks with `--G`, `--R` and `--R_fixer`, e.g. `--G="logs/foo.net"`.)
+* Apply R using `th apply_r.lua --dataset="/path/to/your/images"` .
+
+For `train_r.lua` and `apply_r.lua` you can change the used networks with `--G`, `--R` and `--R_fixer`, e.g. `--G="logs/foo.net"`. You will have to use that if you chose grayscale images (instead of RGB), other image heights/widths or other noise vector dimensions.
 
 # Possible further research
 
