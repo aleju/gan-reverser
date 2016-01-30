@@ -5,6 +5,11 @@ logs/*.net
 logs/*.net.old
 samples/*.jpg
 r_results/*.jpg
+images/*.xcf
+images/clusters/
+images/similar/
+images/fixed_images_528.jpg
+images/fixed_images_528_unfixed.jpg
 
 # Compiled Lua sources
 luac.out
