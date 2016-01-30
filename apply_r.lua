@@ -16,7 +16,8 @@ OPT = lapp[[
     --gpu           (default 0)
     --threads       (default 8)            Number of threads
     --G             (default "logs/adversarial.net")
-    --R             (default "logs/r_3x32x32_nd100_normal.net")
+    --R             (default "logs/r_3x32x32_nd32_normal.net")
+    --R_fixer       (default "logs/r_3x32x32_nd32_normal_fixer.net")
     --dataset       (default "NONE")       Directory that contains *.jpg images
     --writeTo       (default "r_results")  Directory in which to save images
 ]]
@@ -56,7 +57,7 @@ end
 torch.setdefaulttensortype('torch.FloatTensor')
 
 function main()
-    -- load previous network
+    -- load G
     print(string.format("loading trained G from file '%s'", OPT.G))
     local tmp = torch.load(OPT.G)
     MODEL_G = tmp.G
@@ -86,12 +87,21 @@ function main()
     DATASET.setDirs({OPT.dataset})
     ----------------------------------------------------------------------
 
-    -- Initialize G in autoencoder form
-    -- G is a Sequential that contains (1) G Encoder and (2) G Decoder (both again Sequentials)
+    -- Load R
     print(string.format("loading trained R from file '%s'", OPT.R))
     local tmp = torch.load(OPT.R)
     MODEL_R = tmp.R
     MODEL_R:evaluate()
+
+    -- Load R fixer
+    if OPT.R_fixer == "" then
+        MODEL_R_FIXER = MODEL_R
+    else
+        print(string.format("loading trained R-fixer from file '%s'", OPT.R_fixer))
+        local tmp = torch.load(OPT.R_fixer)
+        MODEL_R_FIXER = tmp.R
+        MODEL_R_FIXER:evaluate()
+    end
 
     if OPT.gpu == false then
         MODEL_G:float()
@@ -140,7 +150,7 @@ function main()
     -------------------------------------------
     print("Converting images to attributes...")
     local attributes = NN_UTILS.forwardBatched(MODEL_R, images, OPT.batchSize)
-    --local attributes = binarize(NN_UTILS.forwardBatched(MODEL_R, images, OPT.batchSize))
+    local attributesFixer = NN_UTILS.forwardBatched(MODEL_R_FIXER, images, OPT.batchSize)
 
     -------------------------------------------
     -- Cluster the generated images into 20 clusters
@@ -148,7 +158,7 @@ function main()
     print("Clustering...")
     local nbClusters = 20
     local nbIterations = 15
-    local nbMaxPerCluster = 64
+    local nbMaxPerCluster = 64+7
     local filenamePattern = 'cluster_%02d.jpg'
     createClusterImages(nbClusters, nbIterations, nbMaxPerCluster, images, attributes, filenamePattern)
 
@@ -167,27 +177,14 @@ function main()
     --   noise -> G -> image -> R -> noise -> G -> image
     -------------------------------------------
     print("Fixing faces...")
-    local nbPairs = 50
-    local pairs = torch.zeros(nbPairs, 3, 1+IMG_DIMENSIONS[2]+1, 1 + 2*IMG_DIMENSIONS[3] + 1) -- N pairs, 2 images, 1px borders around pairs
-    pairs[{{}, {3}, {}, {}}] = 1.0 -- blue background
-
-    for i=1,nbPairs do
-        local afterG = images[i]:clone() -- face
-        local afterGR = NN_UTILS.toBatch(attributes[i]) -- noise vector recovered by R
-        afterGR = afterGR:repeatTensor(2, 1) -- for whatever reason torch insists on getting 2 instead of 1 vector
-        local afterGRG = MODEL_G:forward(afterGR):clone()[1] -- fixed face (G->R->G)
-
-        afterG = NN_UTILS.toRgbSingle(afterG, OPT.colorSpace)
-        afterGRG = NN_UTILS.toRgbSingle(afterGRG, OPT.colorSpace)
-
-        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {2, 1+IMG_DIMENSIONS[3]}}] = afterG
-        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {1+IMG_DIMENSIONS[3]+1, 1+IMG_DIMENSIONS[3]+IMG_DIMENSIONS[3]}}] = afterGRG
-    end
-
-    pairs = image.toDisplayTensor{input=pairs, nrow=4, min=0, max=1.0}
-    image.save(paths.concat(OPT.writeTo, string.format('pairs.jpg', i)), pairs)
+    local nbPairs = 52
+    local nbFixedImages = 512+16
+    fixFaces(nbPairs, nbFixedImages, images, attributesFixer)
 end
 
+-- Group all images into clusters based on their recovered noise
+-- vectors (cosine similarity) using kmeans. The generated cluster images
+-- are saved according to parameter filenamePattern.
 function createClusterImages(nbClusters, nbIterations, nbMaxPerCluster, images, attributes, filenamePattern)
     local centroids, counts = unsup.kmeans(attributes, nbClusters, nbIterations)
     local img2cluster = {} -- maps imageIdx => clusterIdx
@@ -241,7 +238,7 @@ function createClusterImages(nbClusters, nbIterations, nbMaxPerCluster, images, 
     for i=1,nbClusters do
         local clusterImgs = cluster2imgs[i]
         if #clusterImgs > 0 then
-            local tnsr = torch.Tensor(1 + #clusterImgs, IMG_DIMENSIONS[1], IMG_DIMENSIONS[2], IMG_DIMENSIONS[3])
+            local tnsr = torch.zeros(1 + #clusterImgs, IMG_DIMENSIONS[1], IMG_DIMENSIONS[2], IMG_DIMENSIONS[3])
             tnsr[1] = averageFaces[i]
             for j=1,#clusterImgs do
                 tnsr[1+j] = clusterImgs[j][1]
@@ -311,25 +308,39 @@ function createSimilaritySearchImages(nbSimilarNeedles, nbShowMax, images, attri
     createImages(similarityMeasurePixelwise, "similar_pixelwise_%02d.jpg")
 end
 
---[[
-function binarize(attributes)
-    local tnsr = torch.Tensor():resizeAs(attributes)
-    for row=1,attributes:size(1) do
-        for col=1,attributes:size(2) do
-            local val = attributes[row][col]
-            if val < -0.15 then
-                val = -1
-            elseif val <= 0.15 then
-                val = 0
-            else
-                val = 1
-            end
-            tnsr[row][col] = val
-        end
+-- Test fixing of faces using R. Generates three images:
+-- (1) Pairs of unfixed and fixed faces next to each other
+-- (2) One big image with the first N faces, unfixed
+-- (3) One big image with the first N faces, fixed
+function fixFaces(nbPairs, nbFixedImages, images)
+    local pairs = torch.zeros(nbPairs, 3, 1+IMG_DIMENSIONS[2]+1, 1 + 2*IMG_DIMENSIONS[3] + 1) -- N pairs, 2 images, 1px borders around pairs
+    pairs[{{}, {3}, {}, {}}] = 1.0 -- blue background
+
+    for i=1,nbPairs do
+        local afterG = images[i]:clone() -- face
+        local afterGR = NN_UTILS.toBatch(attributesFixer[i]) -- noise vector recovered by R
+        afterGR = afterGR:repeatTensor(2, 1) -- for whatever reason torch insists on getting 2 instead of 1 vector
+        local afterGRG = MODEL_G:forward(afterGR):clone()[1] -- fixed face (G->R->G)
+
+        afterG = NN_UTILS.toRgbSingle(afterG, OPT.colorSpace)
+        afterGRG = NN_UTILS.toRgbSingle(afterGRG, OPT.colorSpace)
+
+        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {2, 1+IMG_DIMENSIONS[3]}}] = afterG
+        pairs[{{i}, {}, {2, 1+IMG_DIMENSIONS[2]}, {1+IMG_DIMENSIONS[3]+1, 1+IMG_DIMENSIONS[3]+IMG_DIMENSIONS[3]}}] = afterGRG
     end
-    return tnsr
+
+    pairs = image.toDisplayTensor{input=pairs, nrow=4, min=0, max=1.0}
+    image.save(paths.concat(OPT.writeTo, 'fixed_pairs.jpg'), pairs)
+
+    -- Create one big image of fixed faces (also save the unfixed faces)
+    local unfixedImages = images[{{1,nbFixedImages}, {}, {}, {}}]:clone()
+    unfixedImages = image.toDisplayTensor{input=unfixedImages, nrow=math.floor(math.sqrt(nbFixedImages)), min=0, max=1.0}
+    image.save(paths.concat(OPT.writeTo, string.format('fixed_images_%d_unfixed.jpg', nbFixedImages)), unfixedImages)
+
+    local fixedImages = NN_UTILS.forwardBatched(MODEL_G, attributesFixer[{{1,nbFixedImages}, {}}], OPT.batchSize)
+    fixedImages = image.toDisplayTensor{input=fixedImages, nrow=math.floor(math.sqrt(nbFixedImages)), min=0, max=1.0}
+    image.save(paths.concat(OPT.writeTo, string.format('fixed_images_%d.jpg', nbFixedImages)), fixedImages)
 end
---]]
 
 -- Measure the cosine similarity of two vectors.
 -- @param v1 First vector
