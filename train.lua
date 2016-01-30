@@ -16,8 +16,9 @@ OPT = lapp[[
   --save             (default "logs")       subdirectory to save logs
   --saveFreq         (default 30)           save every saveFreq epochs
   --epochs           (default -1)           Stop after that epoch
-  --network          (default "")           reload pretrained network
-  --G_pretrained_dir (default "logs")
+  --network          (default "")           Filename of a previous training run to continue (in directory --save)
+  --G_pretrained_dir (default "logs")       Directory in which pretrained networks may be saved
+  --nopretraining                           Whether to deactivate loading of pretrained networks
   --noplot                                  plot while training
   --D_sgd_lr         (default 0.02)         D SGD learning rate
   --G_sgd_lr         (default 0.02)         G SGD learning rate
@@ -33,11 +34,11 @@ OPT = lapp[[
   --G_iterations     (default 1)            number of iterations to optimize G for
   --D_clamp          (default 1)            Clamp threshold for D's gradient (+/- N)
   --G_clamp          (default 5)            Clamp threshold for G's gradient (+/- N)
-  --D_optmethod      (default "adam")       adam|adagrad
-  --G_optmethod      (default "adam")       adam|adagrad
+  --D_optmethod      (default "adam")       sgd|adagrad|adadelta|adamax|adam|rmsprob
+  --G_optmethod      (default "adam")       sgd|adagrad|adadelta|adamax|adam|rmsprob
   --threads          (default 4)            number of threads
   --gpu              (default 0)            gpu to run on (default cpu)
-  --noiseDim         (default 100)          dimensionality of noise vector
+  --noiseDim         (default 32)           dimensionality of noise vector
   --noiseMethod      (default "normal")     normal|uniform
   --window           (default 3)            window id of sample image
   --seed             (default 1)            seed for the RNG
@@ -45,7 +46,6 @@ OPT = lapp[[
   --height           (default 32)           Height of the training images
   --width            (default 32)           Width of the training images
   --dataset          (default "NONE")       Directory that contains *.jpg images
-  --nopretraining                           Whether to deactivate loading of pretrained networks
 ]]
 
 NORMALIZE = false
@@ -207,6 +207,7 @@ function main()
     while true do
         if OPT.epochs > -1 and OPT.epochs > EPOCH then
             print("<trainer> Last epoch reached.")
+            save()
             break
         end
 
@@ -229,13 +230,17 @@ function main()
 
         -- Save current net
         if EPOCH % OPT.saveFreq == 0 then
-            local filename = paths.concat(OPT.save, 'adversarial.net')
-            saveAs(filename)
+            save()
         end
 
         EPOCH = EPOCH + 1
         print("")
     end
+end
+
+function save()
+    local filename = paths.concat(OPT.save, 'adversarial.net')
+    saveAs(filename)
 end
 
 -- Save the current models G and D to a file.
