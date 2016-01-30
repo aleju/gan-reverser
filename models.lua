@@ -394,7 +394,11 @@ function models.create_R_default(dimensions, noiseDim, noiseMethod, fixer, cuda)
         conv:add(nn.Copy('torch.FloatTensor', 'torch.CudaTensor', true, true))
     end
 
+    -- for the error fixer, add a dropout layer between input (image) and the
+    -- first layer
     if fixer then
+        -- make the dropout layer always activate (even outside training)
+        -- if its deactivatable, the generated images tend to look bad
         local drop = nn.Dropout(0.5, true)
         drop:training()
         drop.evaluate = function() end
