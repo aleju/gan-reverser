@@ -180,6 +180,15 @@ function main()
     local nbPairs = 52
     local nbFixedImages = 512+16
     fixFaces(nbPairs, nbFixedImages, images, attributesFixer)
+
+    -------------------------------------------
+    -- Detect anomalies
+    -------------------------------------------
+    print("Detecting anomalies...")
+    local nbImagesCalculations = 1024
+    local nbImagesShow = 512+16
+    local threshold = 0.15
+    detectAnomalies(nbImagesCalculations, nbImagesShow, threshold, images, noise, attributesFixer)
 end
 
 -- Group all images into clusters based on their recovered noise
@@ -312,7 +321,7 @@ end
 -- (1) Pairs of unfixed and fixed faces next to each other
 -- (2) One big image with the first N faces, unfixed
 -- (3) One big image with the first N faces, fixed
-function fixFaces(nbPairs, nbFixedImages, images)
+function fixFaces(nbPairs, nbFixedImages, images, attributesFixer)
     local pairs = torch.zeros(nbPairs, 3, 1+IMG_DIMENSIONS[2]+1, 1 + 2*IMG_DIMENSIONS[3] + 1) -- N pairs, 2 images, 1px borders around pairs
     pairs[{{}, {3}, {}, {}}] = 1.0 -- blue background
 
@@ -340,6 +349,42 @@ function fixFaces(nbPairs, nbFixedImages, images)
     local fixedImages = NN_UTILS.forwardBatched(MODEL_G, attributesFixer[{{1,nbFixedImages}, {}}], OPT.batchSize)
     fixedImages = image.toDisplayTensor{input=fixedImages, nrow=math.floor(math.sqrt(nbFixedImages)), min=0, max=1.0}
     image.save(paths.concat(OPT.writeTo, string.format('fixed_images_%d.jpg', nbFixedImages)), fixedImages)
+end
+
+function detectAnomalies(nbImagesCalculations, nbImagesShow, threshold, images, noise, attributesFixer)
+    local anomalyImages = torch.zeros(nbImagesShow, 3, 1+IMG_DIMENSIONS[2]+1, 1+IMG_DIMENSIONS[3]+1)
+    --anomalyImages[{{}, {3}, {}, {}}] = 1.0 -- blue border for OK images
+
+    local distancesForSort = {}
+    local distances = {}
+    for i=1,nbImagesCalculations do
+        local batch = torch.zeros(2, attributesFixer:size(2))
+        batch[1] = attributesFixer[i]
+        local fixedImage = MODEL_G:forward(batch):clone()[1]
+        --local dist = cosineSimilarity(images[i], fixedImage)
+        local dist = 1 - torch.dist(images[i], fixedImage)
+        table.insert(distancesForSort, dist)
+        table.insert(distances, dist)
+    end
+
+    table.sort(distancesForSort)
+    local anomalyBelow = distancesForSort[math.floor(#distancesForSort*threshold)]
+
+    for i=1,nbImagesShow do
+        local dist = distances[i]
+        local isAnomaly = (dist <= anomalyBelow)
+
+        -- red border for anomalies
+        if isAnomaly then
+            --anomalyImages[{{i}, {3}, {1,IMG_DIMENSIONS[2]+2}, {1,IMG_DIMENSIONS[3]+2}}] = 0.0
+            anomalyImages[{{i}, {1}, {1,IMG_DIMENSIONS[2]+2}, {1,IMG_DIMENSIONS[3]+2}}] = 1.0
+        end
+
+        anomalyImages[{{i}, {1,3}, {2,IMG_DIMENSIONS[2]+1}, {2,IMG_DIMENSIONS[3]+1}}] = NN_UTILS.toRgbSingle(images[i], OPT.colorSpace)
+    end
+
+    anomalyImages = image.toDisplayTensor{input=anomalyImages, nrow=math.floor(math.sqrt(nbImagesShow)), min=0, max=1.0}
+    image.save(paths.concat(OPT.writeTo, 'anomalies.jpg'), anomalyImages)
 end
 
 -- Measure the cosine similarity of two vectors.
