@@ -81,6 +81,16 @@ For technical reasons this layer was kept active after training (deactivating it
 The error fixing method might be usable for anomaly detection: Fix an image and compare its unfixed and fixed version with each other.
 If they are too dissimilar, the image may be considered an anomaly.
 
+## Anomaly detection
+
+The method of fixing images can also be used to detect anomalous images.
+In order to do that, one has to pick a generated image, fix it with R and G and then measure the euclidian distance between the original image and the fixed one.
+If the distance is above a threshold, the image can be considered an anomaly.
+
+The following image shows some generated faces. Detected anomalies are marked with a red border.
+
+![Images and detected anomalies](images/anomalies.jpg?raw=true "Images and detected anomalies")
+
 # Usage
 
 Requirements are:
