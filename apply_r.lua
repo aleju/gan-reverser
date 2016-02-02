@@ -351,17 +351,18 @@ function fixFaces(nbPairs, nbFixedImages, images, attributesFixer)
     image.save(paths.concat(OPT.writeTo, string.format('fixed_images_%d.jpg', nbFixedImages)), fixedImages)
 end
 
+-- Find anomalous images among N generated images
 function detectAnomalies(nbImagesCalculations, nbImagesShow, threshold, images, noise, attributesFixer)
-    local anomalyImages = torch.zeros(nbImagesShow, 3, 1+IMG_DIMENSIONS[2]+1, 1+IMG_DIMENSIONS[3]+1)
-    --anomalyImages[{{}, {3}, {}, {}}] = 1.0 -- blue border for OK images
-
-    local distancesForSort = {}
+    -- collect similarity scores
+    -- distances here are really similarities, ie (1-distance)
+    local distancesForSort = {} -- used to find the threshold of the x% most dissimilar images
     local distances = {}
     for i=1,nbImagesCalculations do
         local batch = torch.zeros(2, attributesFixer:size(2))
         batch[1] = attributesFixer[i]
         local fixedImage = MODEL_G:forward(batch):clone()[1]
-        --local dist = cosineSimilarity(images[i], fixedImage)
+        -- distance is based on euclidian distance between originally generated
+        -- image and fixed image
         local dist = 1 - torch.dist(images[i], fixedImage)
         table.insert(distancesForSort, dist)
         table.insert(distances, dist)
@@ -370,13 +371,14 @@ function detectAnomalies(nbImagesCalculations, nbImagesShow, threshold, images, 
     table.sort(distancesForSort)
     local anomalyBelow = distancesForSort[math.floor(#distancesForSort*threshold)]
 
+    -- collect images to show, mark anomalies
+    local anomalyImages = torch.zeros(nbImagesShow, 3, 1+IMG_DIMENSIONS[2]+1, 1+IMG_DIMENSIONS[3]+1)
     for i=1,nbImagesShow do
         local dist = distances[i]
         local isAnomaly = (dist <= anomalyBelow)
 
         -- red border for anomalies
         if isAnomaly then
-            --anomalyImages[{{i}, {3}, {1,IMG_DIMENSIONS[2]+2}, {1,IMG_DIMENSIONS[3]+2}}] = 0.0
             anomalyImages[{{i}, {1}, {1,IMG_DIMENSIONS[2]+2}, {1,IMG_DIMENSIONS[3]+2}}] = 1.0
         end
 
