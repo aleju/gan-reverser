@@ -78,9 +78,6 @@ The following image shows faces before and after fixing.
 To get the best possible effects, it seemed to be a good choice to add a 50% dropout layer at the very start of R (between input and the first layer).
 For technical reasons this layer was kept active after training (deactivating it produced broken images).
 
-The error fixing method might be usable for anomaly detection: Fix an image and compare its unfixed and fixed version with each other.
-If they are too dissimilar, the image may be considered an anomaly.
-
 ## Anomaly detection
 
 The method of fixing images can also be used to detect anomalous images.
